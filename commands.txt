@@ -1,0 +1,5 @@
+qsub -A DD-19-32 -q qexp -l select=1:ncpus=16,walltime=1:00:00 -I
+ml intel CMake Python/3.6.1
+cmake . -DCMAKE_BUILD_TYPE=Release
+make -j
+./PMC ../data/bun_zipper_res4.pts bun_zipper_res4.obj --builder=loop

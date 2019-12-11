@@ -1,3 +1,0 @@
-/home/simon/School/AVS/anselm/Assignment2/Assignment/src/cmake-build-debug/CMakeFiles/rebuild_cache.dir
-/home/simon/School/AVS/anselm/Assignment2/Assignment/src/cmake-build-debug/CMakeFiles/PMC.dir
-/home/simon/School/AVS/anselm/Assignment2/Assignment/src/cmake-build-debug/CMakeFiles/edit_cache.dir

@@ -1,0 +1,19 @@
+Marching cubes -> rekonštrukcia polygóvnovej siete zo skalárneho poľa
+  I. Rozdelenie skalárneho poľa do kociek o určitej veľkosti
+    a) veľkost udáva rozlíšenie výslednej polygónovej siete
+  II. Pri následnom prechode takto rozdeleného poľa je na základe hodnôt vo vrcholoch každej kocky určená
+      konfigurácia polygónov potrebná pre reprezentcáciu časti povrchu prechádzajúceho danou kockou
+    b) Vhodná konfigurácia polygónov je vybratá z 2^8 = 256 možných konfigurácií, tak že hodnoty vo vrcholoch
+       kocky sú prevedené do binárnej podoby porovnaním s požadovanou hodnotou na povrchu (isosurface level)
+    c) Týchto 8 binárnych hodnôt potom tvorí 8-bit ukazateľ do tabuľky možných konfigurácií.
+  III. Lineárna interpolácia vygenerovaných vrcholov pozdĺž hrany kocky, tak aby výsledný vrchol ležal presne
+       na priesečníku medzi povrchom a príslušnou hranou kocky.
+
+ISOSURFACE (level)
+  -> vzdialenosť k najbližšiemu bodu vo vstupnom súbore, na ktorom leží hľadaný povrch
+  -> BaseMeshBuilder.mIsoLevel; ParametricScalarField.getIsoLevel();
+
+GRID
+  -> dĺžka hrany diskretizačnej mriežky a s ňou rozlíšenie diskretizácie a celkový počet "MarchingCubes" (N = g^3)
+  -> BaseMeshBuilder.mGridSize;
+
