@@ -1,0 +1,84 @@
+Architektury Výpočetních Systémů (AVS 2019)
+Projekt č. 2 (PMC)
+Login: xstupi00
+
+Úloha 1: Paralelizace původního řešení
+===============================================================================
+
+1) Kterou ze smyček (viz zadání) je vhodnější paralelizovat a co způsobuje 
+   neefektivitu paralelizaci té druhé?
+
+1a)
+Vhodnejšie je parelelizovať smyčku vo funkcii `LoopMeshBuilder::marchCubes` v
+porovnaní s druhou smyčkou vo funkcii `LoopMeshBuilder::evaluateFieldAt`.
+
+1b)
+Neefektivita druhej smyčky je spôsobená výrazne väčším overheadom ako je samotný
+prínos paralelizácie danej smyčky. Táto smyčka sa nachádza vo funkcii
+`LoopMeshBuilder::evaluateFieldAt, ktorá je volaná 8x pre každý beh funkcie
+`BaseMeshBuilder::buildCube`, pre každý vrchol kocky raz. Pre každú kocku, tak
+dochádza k vytvoreniu a následnému zrušeniu daného počtu vlákien (napr. 16) až 8x,
+čo práve spôsobuje veľký overhead a tým zhoršenie celkovej výkonnosti programu.
+
+-------------------------------------------------------------------------------
+
+2) Jaké plánování (rozdělení práce mezi vlákna) jste zvolili a proč? 
+   Jaký vliv má velikost "chunk" při dynamickém plánování (8, 16, 32, 64)?
+
+
+2a)
+Zvolil som dynamický typ plánovania s hodnotou chunk-size=16 (schedule(dynamic, 16)).
+Tento typ plánovania dosahoval pri testovaní rôznych variant o niečo lepšie výsledky
+ako statické plánovanie a v porovnaní s typom `guided` dosahoval takmer rovnaké
+výsledky. Výpočet pre každú kocku trvá približne rovnaký čas, takže môžme povedať, že
+práca je vhodne distribuovaná medzi jednotlivé vlákna už v základe. Malý rozdiel medzi
+statickým a dynamickým plánovaním môže byť spôsobený tým, že v prípadoch, kedy nie sú
+všetky vrcholy kocky pod alebo nad povrchom (povrch pretína kocku) prebieha oproti
+zvyšným iteráciam aj interpolácia vybraných polygónov, čo spôsobí o niečo dlhšie
+trvanie výpočtu v danej iterácií. Takýchto iterácií, v ktorých dochádza k
+interpolácií polygónov, je však z celkového počtu minimum (cca < 8% u bun_zipper_res a
+< 5% u dragon_vrip_res) a preto dynamické plánovanie nespôsobuje väčši rozdiel v tomto
+procese paralelizácie.
+
+
+2b)
+Pri voľbe dynamického plánovania s rôznou hodnotou parametru `chunk-size` som
+nezaznamenal žiadne výrazné zmeny vo výkonnosti programu.
+
+-------------------------------------------------------------------------------
+
+3) Jakým způsobem zajišťujete ukládání trojúhelníků z několika vláken současně?
+
+Použitím pragmy `omp critical` vo funkcii `LoopMeshBuilder::emitTriangle` pred
+uložením daného trojuholníka `BaseMeshBuilder::Triangle_t` do vektora už
+uložených trojuholníkov `LoopMeshBuilder::mTriangles`. Táto pragma identifikuje
+sekcie kódu, ktoré musia byť vykonávané len jedným vláknom v danom čase a
+zabezpečuje tak, že zápis do vektora bude realizovať vždy len jedno vlákno.
+V prípade, že niektoré z vlákien práve realizuje zápis do vektora a súčasne
+iné vlákno má taktiež požiadavku na zápis, bude musieť toto vlákno čakať na
+začiatku kritickej sekcie dokiaľ prvé vlákno nedokončí operáciu zápisu a tým
+vypadne z kritickej sekcie, čím umožní vstup inému vláknu, ktoré čaká na vstupe.
+
+
+Úloha 2: Paralelní průchod stromem
+===============================================================================
+
+1) Stručně popište použití OpenMP tasků ve vašem řešení.
+
+2) Jakým způsobem jste realizovali sesbírání celkového počtu trojúhelníků?
+
+3) Jaký vliv má na vaše řešení tzv. "cut-off"? Je vhodné vytvářet nový 
+   task pro každou krychli na nejnižší úrovni?
+
+4) Jakým způsobem zajišťujete ukládání trojúhelníků z několika vláken současně?
+
+Úloha 2: Grafy škálování obou řešení
+===============================================================================
+
+1) Stručně zhodnoťte efektivitu vytvořených řešení (na základě grafů škálování).
+
+2) V jakém případě (v závislosti na počtu bodů ve vstupním souboru a velikosti 
+   mřížky) bude vaše řešení 1. úlohy neefektivní? (pokud takový případ existuje)
+
+3) Je (nebo není) stromový algoritmus efektivnější z pohledu slabého škálování 
+   vzhledem ke vstupu?
