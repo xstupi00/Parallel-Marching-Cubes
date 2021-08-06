@@ -11,20 +11,23 @@ Login: xstupi00
 1a)
 Vhodnejšie je parelelizovať smyčku vo funkcii `LoopMeshBuilder::marchCubes` v
 porovnaní s druhou smyčkou vo funkcii `LoopMeshBuilder::evaluateFieldAt`.
+Tento fakt vyplýva aj zo všeobecnej požiadavky paralelizácie, že paralelizované
+by mali byť vždy najvrchnejšie smyčky, čo v tomto prípade je smyčka vo funkcii
+`LoopMeshBuilder::marchCubes`.
 
 1b)
 Neefektivita druhej smyčky je spôsobená výrazne väčším overheadom ako je samotný
 prínos paralelizácie danej smyčky. Táto smyčka sa nachádza vo funkcii
 `LoopMeshBuilder::evaluateFieldAt, ktorá je volaná 8x pre každý beh funkcie
 `BaseMeshBuilder::buildCube`, pre každý vrchol kocky raz. Pre každú kocku, tak
-dochádza k vytvoreniu a následnému zrušeniu daného počtu vlákien (napr. 16) až 8x,
-čo práve spôsobuje veľký overhead a tým zhoršenie celkovej výkonnosti programu.
+dochádza k vytvoreniu a následnému zrušeniu daného počtu vlákien (napr. 16) až
+8x, čo práve spôsobuje veľký overhead a tým zhoršenie celkovej výkonnosti
+lprogramu.
 
 -------------------------------------------------------------------------------
 
 2) Jaké plánování (rozdělení práce mezi vlákna) jste zvolili a proč? 
    Jaký vliv má velikost "chunk" při dynamickém plánování (8, 16, 32, 64)?
-
 
 2a)
 Zvolil som dynamický typ plánovania s hodnotou chunk-size=16 (schedule(dynamic, 16)).
@@ -65,20 +68,220 @@ vypadne z kritickej sekcie, čím umožní vstup inému vláknu, ktoré čaká n
 
 1) Stručně popište použití OpenMP tasků ve vašem řešení.
 
+Vo funkcii `TreeMeshBuilder::marchCubes` bola použitá pragma `omp parallel` ktorá
+zabezpečí paralelizovanie zvolenej sekcie kódu a teda, vytvorí paralelnú oblasť.
+V tejto pragme by mohol byť použitý dôvetok `default(shared)`, ktorý je
+ekvivalentný použitiu dôvetkom `default(none), shared(totalTriangles, field)` a
+deklaruje zdieľanie týchto premenných medzi všetkými vláknami v danej paralelnej
+oblasti, avšak vďaka nasledujúcej pragme to nie je nutne explicitne uvádzať.
+Ďaľšia pragma ktorá bola použitá v tejto funkcii, hneď po deklarovaní paralelnej
+oblasti, je pragma `omp single`, ktorá identifikuje časť kódu, ktorá musí byť
+spustená výhradne jedným dostupným vláknom. V našom prípade pôjde o volanie
+funkcie `TreeMeshBuilder:octree`, ktorá implementuje samotný prechod mriežkou
+využitím stromovej dekompozície. Vlákno, ktoré sa ako prvé dostane k pragme
+`omp single`, bude následne vykonávať funkciu `TreeMeshBuilder:octree` a
+zvyšné vlákna v paralelnej oblasti budú zatiaľ čakať na inú potencionálnu
+prácu v tejto paralelnej oblasti.
+
+Vo funkcii `TreeMeshBuilder:octree` sa nachádza ďalšia pragma, ktorá umožňuje
+paralelizáciu rekurzívneho výpočtu, teda v našom prípade prechod mriežkou,
+respektíve prechod stromom. Táto pragma obsahuje dôvetok `shared(sum)`, ktorý
+deklaruje zdieľané použitie tejto premennej medzi všetkými vláknami vykonávajúce
+jednotlivé tasky. Ak vlákno, ktoré vykonáva funkciu `TreeMeshBuilder:octree`, dôjde
+k tejto direktíve `task`, vygeneruje nové inštancie taskov, zabalí kód a data pre
+ich vykonanie. Tieto tasky sú následne vykonávané voľnými vlákanami v danej
+paralelnej oblasti v neurčenom poradí a nezávisle na sebe. Konkrétne v našom
+prípade dôjde vždy k vygenerovaniu ôsmich rekurzívnych volaní funkcie
+`TreeMeshBuilder:octree`, respektíve z pohľadu stromu k rozdeleniu aktuálneho
+priestoru na osem podpriestorov.
+
+-------------------------------------------------------------------------------
+
 2) Jakým způsobem jste realizovali sesbírání celkového počtu trojúhelníků?
+
+Vzhľadom na to, že celkový počet trojuholníkov bude známy až po zanorení na
+poslednú úroveň bola použitá synchronizácia taskov, kde rodič, ktorý
+jednotlivé tasky vygeneroval, čaká na svojich potomkov. Takto bol využitý
+fakt, že každý vygenerovaný task je dcérskym taskom generujúceho tasku.
+Pre tento účel bola použitá pragma `omp taskwait`, ktorá špecifikuje čakanie
+rodičovských taskov, dokiaľ nebudú kompletné všetky nimi vygenerované dcérske
+tasky.
+
+Vzhľadom na to, že na konci potrebujeme vedieť celkový počet vygenerovaných
+trojuholníkov, boli taktiež použité atomické operácie pre zozbieranie počtov
+od každého potomka. K naplneniu tohto požiadavku bola použitá pragma
+`omp atomic`, ktorá umožnuje atomický prístup k určitému miestu v pamäti a
+zabraňuje tak možnému paralelnému prístupu k danému miestu. Konkrétne bol
+použitý dôvetok `update`, ktorý zabezpečuje atomické aktualizovanie danej
+premennej. Tento dôvetok zaručuje, že zdieľaná premenná `sum` bude vždy
+aktualizovaná len jedným vláknom, čím sa zabráni chybám, ktoré by mohli
+vzniknúť pri súčasnom zápise do tejto premennej. Dôvetok `update` však
+neumožňuje zapisovať ľubovoľné data do danej premennej, ale data, ktoré
+závisia od prechádzajúcich údajov v pamäti. Z tohto dôvodu bola použitá
+privátna premenná `res_sum` u každého tasku, ktorá slúži na ukladanie
+čiastkových súčtov jednotlivých taskov. Pomocou tejto pragmy bude teda
+zabezpečené, že jednotlivé čiastkové súčty (`res_sum`), ktoré budú
+spočítané jednotlivými taskami budú atomicky pripočítané do celkového
+súčtu (`sum`) vygenerovaných trojuholníkov.
+
+-------------------------------------------------------------------------------
 
 3) Jaký vliv má na vaše řešení tzv. "cut-off"? Je vhodné vytvářet nový 
    task pro každou krychli na nejnižší úrovni?
 
+3a)
+Zvolená hraničná hodnota "cut-off" podmienky bola stanovená na 1. To znamená, že
+kocky ktorými prechádza hľadaný povrch (isoSurface) sú dekomponované maximálne
+na kocky s dĺžkou hrany 1, na ktoré je následne volaná funkcia
+`BaseMeshBuilder::buildCube`. V prípade, že by hodnota "cut-off" podmienky mala
+hodnotu väčšiu ako 1 (napr. 2, 4, 8, ...) výsledný objekt by neobsahoval dostatočný
+počet vygenerovaných trojuholníkov a celý objekt by nebol súvislý, respektíve by
+bol tvorený len časťou trojuholníkov po jeho povrchu, ktoré by predstavovali akýsi
+obrys pôvodneho objektu. Keďže je vygenerovaný počet trojuholníkov menší, je zrejmé,
+že celková doba programu so stúpajúcou hodnotou "cut-off" podmienky klesá. Tento
+predpoklad bol experimentálne otestovaný na objekte `bun_zipper_pts4`, kde pri hodnote
+"cut-off" podmienky rovnej 1, bolo vygenerovaných 42476 trojuholníkov, avšak pri
+hodnote 2 len 5516 trojholníkov a pri hodnote "cut-off" podmienky rovnej 4 dokonca
+len 736 trojuholníkov. Nastavovať hodnotu "cut-off" podmienky na menšiu ako 1, je
+celkom irelevantné, pretože výsledný objekt má správne vytvorenú len prednú časť
+a v zadnej časti chýba veľká časť pôvodných trojuholníkov. Navyše tento výpočet
+obsahuje vačší počet vygenerovaných trouholníkov a tak je zrejmé že trvá dlhšie
+oproti výpočtu s hodnotou "cut-off" podmienky rovnej 1.
+
+3b)
+Kocky na najnižšej úrovni sú spracovávané funkciou `BaseMeshBuilder::buildCube`.
+V našom riešení sú nové tasky vytvárané len pri dekomponovaní kocky do príslušných
+podpriestorov (kociek), teda pri rekurzívnom volaní funkcie `TreeMeshBuilder::octree`.
+V prípade, že dané volanie už obsahuje kocku, ktorá sa nachádza na najnižšej úrovni,
+bude jej spracovanie vykonané priamo v rámci daného tasku príslušným vláknom a preto
+nie je nutné vytvárať ďalší nový task pre jej následné spracovanie.
+
+-------------------------------------------------------------------------------
+
 4) Jakým způsobem zajišťujete ukládání trojúhelníků z několika vláken současně?
 
-Úloha 2: Grafy škálování obou řešení
+Rovnakým spôsobom ako v 1.úlohe `loop`, teda použitím pragmy `omp critical`
+vo funkcii `LoopMeshBuilder::emitTriangle` pred uložením daného trojuholníka
+`BaseMeshBuilder::Triangle_t` do vektora už uložených trojuholníkov
+`LoopMeshBuilder::mTriangles`. Význam a detaily tejto pragmy v kontexte nášho
+programu už boli popísané v odseku 1.3 a jej použitie sa v tejto úlohe
+nezmenilo.
+
+Ako je možné vidieť v implementáciach, v oboch úlohach však bolo testované aj ukladanie
+trojuholníkov z niekoľkých vlákien súčasne do hashovacej tabuľky. Táto štruktúra
+umožňuje vynechať použitie pragmy `omp critical`, z dôvodu, že každé vlákno na
+základe svojho čisla (`omp_get_thread_num()`) pristupuje k vlastnej vyhradenej
+časti pamäti. Číslo kazdého vlákna tak predstavuje kľúč do tejto tabuľky v ktorej
+sú položkami vektory trojuholníkov. Na konci behu funkcie `TreeMeshBuilder::marchCubes`
+sú tak v tejto tabuľke uložené vektory vygenerovaných trojuholníkov, uložené pod čislami
+jednotlivých vlákien, ktoré tieto trojuholníky vygenerovali. Kvôli požiadavke funkcie
+`BaseMeshBuilder::storeMeshFile`, ktorá očakáva ukazateľ na súvislú oblasť trojuholníkov,
+musia byt ešte následne tieto vektory spojené do spoločného poľa trojukolníkov.
+
+Táto implementácia však nepriniesla takmer žiadne zlepšenie v porovnaní s prvým
+riešením, kde bola použitá pragma `omp critical`. V oboch riešeniach bol zmeraný
+čas výpočtu vo funkcii `TreeMeshBuilder::marchCubes`, ktorý bol v oboch prípadoch
+takmer identický. Toto zistenie je však pravdivé len pri určitom počte vlákien,
+presnejšie maximálny počet vlákien je 16. Pri malom počte vlákien nedochádza k
+častému a výraznemu zdržaniu sa vlákien na vstupe do kritickej sekcie a tým nie je
+ovplyvnená ani celková doba výpočtu v spomínanej funkcii. Pri zvýšení počtu vlákien
+na 32, však došlo k tomu, že doba behu výpočtu s využitím pragmy stúpla až takmer
+trojnásobne, zatiaľ čo doba behu výpočtu s využítím hashovacej tabuľky ostala
+nezmenená. Na základe týchto zistení, tak bol odvodený záver, že pri malom
+počte vlákien je postačujúci jeden spoločný vektor s prístupom k nemu v rámci
+kritickej sekcie, avšak, pri väčšom počte vlákien je vhodnejšie kritickú sekciu
+vynechať a použiť riešenie práve napríklad s hashovacou tabuľkou.
+
+-------------------------------------------------------------------------------
+
+Úloha 3: Grafy škálování obou řešení
 ===============================================================================
 
 1) Stručně zhodnoťte efektivitu vytvořených řešení (na základě grafů škálování).
 
+1a) SILNÉ ŠKǍLOVANIE
+Graf silného škálovania popisuje celkovú prácu výpočtu. Predpoklad pri tomto
+škálovaní je, že chceme vykonať úlohu danej veľkosti N čo najrýchlejšie.
+Ideálna krivka pri tomto type škálovania predstavuje klesajúcu lineárnu
+priamku so smernicou -0.5. Inak povedané, ak zdvojnásobíme počet vlákien,
+očakávame, že doba výpočtu spadne na polovicu.
+
+Vytvorené grafy silného škálovania ukazujú, že predpoklad lepšie napĺňa
+riešenie `OpenMP Loop`. Toto riešenie dokáže škálovať takmer ideálne,
+až na isté kombinácie veľkosti vstupov a počtu vlákien. V prípadoch,
+kedy je vstup dostatočne veľký (>=320) škálovanie tohto riešenia napĺňa
+pôvodne očakavánia a s pribúdajúcimi vláknami sa doba výpočtu vhodne
+znižuje. V prípadoch kedy veľkosť vstupu nedosiahne stanovenú hranicu
+(<320) dokáže tento prístup škálovať len do istého počtu vlákien (<8),
+následne už túto vlastnosť stráca a doba výpočtu s pribudajúcimí vláknami
+stúpne. Je to spôsobené tým, že samotná réžia na rozdistribuovanie
+úloh medzi jednotlivé vlákna a ich riadenie je v tomto prípade
+už náročnejšie ako samotný výpočet prevádzaný jednotlivými vláknami.
+
+Graf silného škálovania riešenia `Octree` škáluje o niečo menej
+vhodne vo viacerých kombináciach veľkosti vstupu a počtu vlákien.
+V prípade malej veľkosti vstupu (<160) sa škálovanie prejaví len
+minimálne, dokonca v prípade pridania len jedného vlákna alebo
+prekročenia istého počtu vlákien (>16) sa doba výpočtu este zhorší.
+Toto zhoršenie je znova spôsobené nepomerom medzi dobou samotného
+výpočtu a réžiou potrebnej k riadeniu jednotlivých vytvorených vlákien.
+V prípade dostatočne veľkého vstupu (>=160) škáluje toto riešenie
+takmer ideálne a doba výpočtu klesá so zvyšujúcim sa počtom vlákien.
+
+1b) SLABÉ ŠKǍLOVANIE
+Graf slabého škálovania popisuje konštantný čas výpočtu na jádro, respektíve
+v našom prípade na vlákno. Predpoklad pri tomto škálovaní je, že chceme riešiť
+väčšie problémy na väčšom stroji za rovnakú výpočetnú dobu. Ideálna krivka
+pri tomto type škálovania je reprezentovaná konštantnou priamkou so smernicou
+rovnou 0. Inak povedané, ak zdvojnásobíme veľkosť vstupu a úlohu spustíme na
+dvojnásobnom počte vlákien, tak očakávame, že dostaneme rovnaký výpočetný čas.
+
+Vytvorené grafy slabého škálovania ukazujú, že predpoklad lepšie napĺňa
+opäť riešenie `OpenMP Loop`. Jednotlivé krivky grafu sú až na jedinú
+výnimku takmer vždy konštatné, dokonca mierne klesajúce. To teda znamená,
+že v tomto riešení je doba výpočtu minimálne konštatná v prípade, že
+pridáme dvojnásobný počet vlákien na dvojnásobnú veľkosť vstupu.
+Tento fakt nie je naplnený len v prípade, kedy je veľkosť vstupu
+na vlákno príliš malá (10) a počet vlákien priliš veľký (16).
+V tomto prípade znova dôjde k prôblemu s vysokou réžiou koordinácie
+vlákien na úkor celkovej doby výpočtu programu.
+
+Graf slabého škálovania riešenia `Octree` ukazuje, že predpoklad tohto
+škálovania nie je takmer vôbec naplnený a doba výpočtu sa takmer v každom
+prípade aspoň o niečo zväčší. Toto riešenie takmer vôbec neškáluje voči
+slabému škálovaniu.
+
+-------------------------------------------------------------------------------
+
 2) V jakém případě (v závislosti na počtu bodů ve vstupním souboru a velikosti 
    mřížky) bude vaše řešení 1. úlohy neefektivní? (pokud takový případ existuje)
 
+Na základe grafov škálovania môžme povedať, že by taký prípad nemal existovať.
+Avšak, riešenie `OpenMP Loop` paralelizuje len počet súčasne zostavovaných
+kociek, ale samotný výpočet jednotlivých kociek už nie je paralelizovaný.
+Vzhľadom na to bude vytvorené riešenie vhodne škálovať s rastúcou veľkosťou
+mriežky, ale z hľadiska počtu bodov bude škalovať o niečo horšie. Tento
+fakt však platí nie len u riešenia `OpenMP Loop`, ale rovnako je to aj u
+riešenia `Octree`.
+
+Riešenie `OpenMP Loop` však bude neefektívne v prípade, kedy bude nevhodný
+pomer medzi celkovým objemom daného prehľadávaného priestoru a obsahom
+povrchu spracovovaného objektu. Riešenie bude zbytočne prehľadávať veľké
+množstvo kociek, v dôsledku čoho sa bude so zväčšujúcou veľkosťou mriežky
+len zhoršovať celková efektivita samotného riešenia. Ak to porovnáme s riešením
+`Octree`, tak v takomto prípade, dôjde k vyradeniu väčšej časti z celkového
+prehľadávaného objemu nezávisle na danej veľkosti mriežky.
+
+-------------------------------------------------------------------------------
+
 3) Je (nebo není) stromový algoritmus efektivnější z pohledu slabého škálování 
    vzhledem ke vstupu?
+
+Na základe grafov slabého škálovania oboch riešení môžme pozorovať, že riešenie
+`Octree` nie je efektívnejšie v porovnaní s prvým riešením `OpenMP Loop`. Prvé
+riešenie vykazuje takmer ideálne slabé škálovanie, pretože so zvyšujúcim sa
+počtom vlákien ostáva celková doba výpočtu minimálne rovnaká. Riešenie `Octree`
+však takmer vôbec neškáluje pri malých vstupoch, kde sa celková doba výpočtu
+vo väčšine prípadov ešte zvýši. Na základe oboch grafov slabého škálovania však
+môžme prepdpokladať, že pri väčších veľkostiach vstupov by bol rozdiel v škálovaní
+medzi oboma riešeniami už minimálny.

@@ -5,12 +5,13 @@
  *
  * @brief   Parallel Marching Cubes implementation using OpenMP loops
  *
- * @date    11.12.2019 17:00
+ * @date    15.12.2019 10:00
  **/
 
 #include <iostream>
 #include <math.h>
 #include <limits>
+#include <omp.h>
 
 #include "loop_mesh_builder.h"
 
@@ -27,7 +28,7 @@ unsigned LoopMeshBuilder::marchCubes(const ParametricScalarField &field) {
     unsigned totalTriangles = 0;
 
     // 2. Loop over each coordinate in the 3D grid.
-#pragma omp parallel for default(shared) reduction(+:totalTriangles) schedule(dynamic, 32)
+#pragma omp parallel for default(shared) reduction(+:totalTriangles) schedule(dynamic, 16)
     for (size_t i = 0; i < totalCubesCount; ++i) {
         // 3. Compute 3D position in the grid.
         Vec3_t<float> cubeOffset(i % mGridSize,
@@ -49,13 +50,13 @@ float LoopMeshBuilder::evaluateFieldAt(const Vec3_t<float> &pos, const Parametri
     // 1. Store pointer to and number of 3D points in the field
     //    (to avoid "data()" and "size()" call in the loop).
     const Vec3_t<float> *pPoints = field.getPoints().data();
-    const unsigned count = unsigned(field.getPoints().size());
+    const auto count = unsigned(field.getPoints().size());
 
     float value = std::numeric_limits<float>::max();
 
     // 2. Find minimum square distance from points "pos" to any point in the
     //    field.
-//#pragma omp parallel for default(shared) reduction(min:value) schedule(static)
+#pragma omp simd reduction(min:value) linear(pPoints) simdlen(16)
     for (unsigned i = 0; i < count; ++i) {
         float distanceSquared = (pos.x - pPoints[i].x) * (pos.x - pPoints[i].x);
         distanceSquared += (pos.y - pPoints[i].y) * (pos.y - pPoints[i].y);
@@ -63,7 +64,7 @@ float LoopMeshBuilder::evaluateFieldAt(const Vec3_t<float> &pos, const Parametri
 
         // Comparing squares instead of real distance to avoid unnecessary
         // "sqrt"s in the loop.
-        value = std::min(value, distanceSquared);
+        value = (value < distanceSquared) ? value : distanceSquared;
     }
 
     // 3. Finally take square root of the minimal square distance to get the real distance
@@ -78,4 +79,5 @@ void LoopMeshBuilder::emitTriangle(const BaseMeshBuilder::Triangle_t &triangle) 
     // after "marchCubes(...)" call ends.
 #pragma omp critical(emitTriangle)
     mTriangles.push_back(triangle);
+//    mTriangles[omp_get_thread_num()].push_back(triangle);
 }

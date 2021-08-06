@@ -1,7 +1,0 @@
-src/CMakeFiles
-src/cmake-build-debug
-src/CMakeCache.txt
-src/Makefile
-src/PMC
-src/cmake_install.cmake
-src/*.obj
